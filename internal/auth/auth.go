@@ -10,6 +10,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type contextKey string
+
+const authContextKey contextKey = "authenticatedRequest"
+
 // AuthenticatedRequest represents an HTTP request with authentication context.
 type AuthenticatedRequest struct {
 	*http.Request
@@ -95,6 +99,15 @@ func CompareAPIKey(key, hash string) bool {
 	return err == nil
 }
 
+// GetTenantID extracts the tenant ID from an authenticated request context.
+func GetTenantID(ctx context.Context) (int64, bool) {
+	authReq, ok := ctx.Value(authContextKey).(*AuthenticatedRequest)
+	if !ok {
+		return 0, false
+	}
+	return authReq.TenantID, true
+}
+
 // Middleware creates an HTTP middleware that validates API keys and adds tenant context.
 func Middleware(store Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -119,13 +132,14 @@ func Middleware(store Store) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Look up the API key by hash
+			// Hash the provided key to look it up
 			keyHash, err := HashAPIKey(apiKey)
 			if err != nil {
 				http.Error(w, ErrInvalidAPIKey.Error(), http.StatusUnauthorized)
 				return
 			}
 
+			// Look up the API key by hash
 			ak, err := store.GetByKeyHash(r.Context(), keyHash)
 			if err != nil {
 				http.Error(w, ErrInvalidAPIKey.Error(), http.StatusUnauthorized)
@@ -139,12 +153,13 @@ func Middleware(store Store) func(http.Handler) http.Handler {
 
 			// Create authenticated request with tenant context
 			authReq := &AuthenticatedRequest{
-				Request: r,
+				Request:  r,
 				TenantID: ak.TenantID,
 			}
 
-			// Call the next handler with the authenticated request
-			next.ServeHTTP(w, authReq.Request.WithContext(r.Context()))
+			// Add to context and call the next handler
+			ctx := context.WithValue(r.Context(), authContextKey, authReq)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
