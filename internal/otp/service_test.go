@@ -207,8 +207,8 @@ func TestServiceVerifyRejectsExpiredOTP(t *testing.T) {
 func TestServiceVerifyReturnsErrInvalidOTPOnFailedMarkAsUsed(t *testing.T) {
 	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	repository := &repositoryStub{
-		record:       OTP{ID: 42, CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)},
-		markUsedErr:  ErrOTPNotFound,
+		record:      OTP{ID: 42, CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)},
+		markUsedErr: ErrOTPNotFound,
 	}
 	service := newService(
 		repository,
