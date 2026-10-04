@@ -14,6 +14,7 @@ developed incrementally as a production-minded modular monolith.
 - Phase 2.6: Secure OTP generation — complete.
 - Phase 2.7: OTP hashing and comparison — complete.
 - Phase 2.8: OTP service layer — complete.
+- Phase 2.9: Send OTP API — complete.
 
 ## Database schema
 
@@ -52,5 +53,12 @@ The PostgreSQL implementation stores only the supplied OTP hash and returns the
 database-generated record. OTP generation uses `crypto/rand` to produce numeric
 codes without predictable randomness. OTPs are hashed with bcrypt before they
 reach persistence. The service layer validates E.164 phone numbers, issues
-five-minute OTPs, and coordinates persistence. Sending and verification flows
-are implemented in later phases.
+five-minute OTPs, and coordinates persistence. The API issuance flow is ready;
+an external delivery provider and verification flow are implemented in later
+phases.
+
+## API
+
+`POST /v1/otp/send` accepts an E.164 phone number and creates an OTP record.
+It responds with `202 Accepted` and the expiry timestamp; the plaintext OTP is
+never included in an API response.

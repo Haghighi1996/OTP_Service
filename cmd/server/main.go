@@ -10,6 +10,7 @@ import (
 	"otp-service/internal/config"
 	"otp-service/internal/database"
 	"otp-service/internal/handler"
+	"otp-service/internal/otp"
 	"syscall"
 	"time"
 )
@@ -38,9 +39,13 @@ func run() error {
 	}
 	defer pool.Close()
 
+	otpRepository := otp.NewPostgresRepository(pool)
+	otpService := otp.NewService(otpRepository)
+	otpHandler := handler.NewOTPHandler(otpService)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.HealthHandler)
-	mux.HandleFunc("/v1/otp/send", handler.SendOTPHandler)
+	mux.HandleFunc("/v1/otp/send", otpHandler.Send)
 
 	server := &http.Server{
 		Addr:    settings.HTTPAddr,
