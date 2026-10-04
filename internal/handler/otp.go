@@ -8,14 +8,15 @@ import (
 	"net/http"
 	"time"
 
+	"otp-service/internal/auth"
 	"otp-service/internal/otp"
 )
 
 const maxRequestBodyBytes = 1 << 20
 
 type otpService interface {
-	Issue(context.Context, string) (otp.IssuedOTP, error)
-	Verify(context.Context, string, string) error
+	Issue(context.Context, int64, string) (otp.IssuedOTP, error)
+	Verify(context.Context, int64, string, string) error
 }
 
 // OTPHandler exposes HTTP endpoints for OTP operations.
@@ -65,7 +66,13 @@ func (h *OTPHandler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issued, err := h.service.Issue(r.Context(), request.PhoneNumber)
+	tenantID, ok := auth.GetTenantID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid or missing API key"})
+		return
+	}
+
+	issued, err := h.service.Issue(r.Context(), tenantID, request.PhoneNumber)
 	if errors.Is(err, otp.ErrInvalidPhoneNumber) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid phone number"})
 		return
@@ -114,7 +121,13 @@ func (h *OTPHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.service.Verify(r.Context(), request.PhoneNumber, request.Code)
+	tenantID, ok := auth.GetTenantID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid or missing API key"})
+		return
+	}
+
+	err := h.service.Verify(r.Context(), tenantID, request.PhoneNumber, request.Code)
 	if errors.Is(err, otp.ErrInvalidPhoneNumber) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid phone number"})
 		return

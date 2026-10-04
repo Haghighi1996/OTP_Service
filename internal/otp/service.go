@@ -60,10 +60,14 @@ func newService(
 }
 
 // Issue creates and persists a new OTP for a phone number.
-func (s *Service) Issue(ctx context.Context, phoneNumber string) (IssuedOTP, error) {
+func (s *Service) Issue(ctx context.Context, tenantID int64, phoneNumber string) (IssuedOTP, error) {
 	phoneNumber = strings.TrimSpace(phoneNumber)
 	if !isE164PhoneNumber(phoneNumber) {
 		return IssuedOTP{}, ErrInvalidPhoneNumber
+	}
+
+	if tenantID == 0 {
+		return IssuedOTP{}, errors.New("tenant ID is required")
 	}
 
 	code, err := s.generate(s.codeLength)
@@ -80,6 +84,7 @@ func (s *Service) Issue(ctx context.Context, phoneNumber string) (IssuedOTP, err
 		PhoneNumber: phoneNumber,
 		CodeHash:    codeHash,
 		ExpiresAt:   s.now().UTC().Add(s.ttl),
+		TenantID:    tenantID,
 	})
 	if err != nil {
 		return IssuedOTP{}, fmt.Errorf("persist OTP: %w", err)
@@ -90,10 +95,14 @@ func (s *Service) Issue(ctx context.Context, phoneNumber string) (IssuedOTP, err
 
 // Verify checks a submitted OTP against the newest unused record for a phone
 // number. Expiration and one-time consumption are enforced in this method.
-func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
+func (s *Service) Verify(ctx context.Context, tenantID int64, phoneNumber, code string) error {
 	phoneNumber = strings.TrimSpace(phoneNumber)
 	if !isE164PhoneNumber(phoneNumber) {
 		return ErrInvalidPhoneNumber
+	}
+
+	if tenantID == 0 {
+		return errors.New("tenant ID is required")
 	}
 
 	code = strings.TrimSpace(code)
@@ -101,7 +110,10 @@ func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
 		return ErrInvalidCode
 	}
 
-	record, err := s.repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	record, err := s.repository.GetLatestUnusedByPhoneNumber(ctx, GetOTPParams{
+		PhoneNumber: phoneNumber,
+		TenantID:    tenantID,
+	})
 	if errors.Is(err, ErrOTPNotFound) {
 		return ErrInvalidOTP
 	}
@@ -124,7 +136,7 @@ func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
 		return ErrInvalidOTP
 	}
 
-	if err := s.repository.MarkAsUsed(ctx, record.ID); err != nil {
+	if err := s.repository.MarkAsUsed(ctx, MarkOTPParams{ID: record.ID, TenantID: tenantID}); err != nil {
 		if errors.Is(err, ErrOTPNotFound) {
 			// This can happen in a race condition where the OTP was used by
 			// another request after we loaded it but before we marked it.
@@ -152,3 +164,4 @@ func isE164PhoneNumber(phoneNumber string) bool {
 
 	return true
 }
+

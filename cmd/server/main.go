@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"otp-service/internal/auth"
 	"otp-service/internal/config"
 	"otp-service/internal/database"
 	"otp-service/internal/handler"
@@ -39,14 +40,20 @@ func run() error {
 	}
 	defer pool.Close()
 
+	// Initialize auth store and middleware
+	authStore := auth.NewStore(pool)
+	authMiddleware := auth.Middleware(authStore)
+
 	otpRepository := otp.NewPostgresRepository(pool)
 	otpService := otp.NewService(otpRepository)
 	otpHandler := handler.NewOTPHandler(otpService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.HealthHandler)
-	mux.HandleFunc("/v1/otp/send", otpHandler.Send)
-	mux.HandleFunc("/v1/otp/verify", otpHandler.Verify)
+
+	// Apply auth middleware to OTP endpoints
+	mux.Handle("/v1/otp/send", authMiddleware(http.HandlerFunc(otpHandler.Send)))
+	mux.Handle("/v1/otp/verify", authMiddleware(http.HandlerFunc(otpHandler.Verify)))
 
 	server := &http.Server{
 		Addr:    settings.HTTPAddr,

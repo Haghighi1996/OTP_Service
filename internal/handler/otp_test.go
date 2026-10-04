@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"otp-service/internal/auth"
 	"otp-service/internal/otp"
 )
+
+const testTenantID = int64(1)
 
 func TestOTPHandlerSend(t *testing.T) {
 	expiresAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -22,6 +25,14 @@ func TestOTPHandlerSend(t *testing.T) {
 	handler := NewOTPHandler(issuer)
 
 	request := httptest.NewRequest(http.MethodPost, "/v1/otp/send", strings.NewReader(`{"phone_number":"+12025550123"}`))
+	request.Header.Set("Authorization", "Bearer valid-key")
+	// Mock the auth middleware by setting tenant context
+	ctx := context.WithValue(request.Context(), auth.AuthContextKey, &auth.AuthenticatedRequest{
+		Request:  request,
+		TenantID: testTenantID,
+	})
+	request = request.WithContext(ctx)
+
 	response := httptest.NewRecorder()
 	handler.Send(response, request)
 
@@ -88,6 +99,13 @@ func TestOTPHandlerSendRejectsInvalidRequest(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			handler := NewOTPHandler(test.issuer)
 			request := httptest.NewRequest(test.method, "/v1/otp/send", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer valid-key")
+			// Mock the auth middleware by setting tenant context
+			ctx := context.WithValue(request.Context(), auth.AuthContextKey, &auth.AuthenticatedRequest{
+				Request:  request,
+				TenantID: testTenantID,
+			})
+			request = request.WithContext(ctx)
 			response := httptest.NewRecorder()
 
 			handler.Send(response, request)
@@ -102,11 +120,32 @@ func TestOTPHandlerSendRejectsInvalidRequest(t *testing.T) {
 	}
 }
 
+func TestOTPHandlerSendRejectsMissingAuth(t *testing.T) {
+	issuer := &otpServiceStub{}
+	handler := NewOTPHandler(issuer)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/otp/send", strings.NewReader(`{"phone_number":"+12025550123"}`))
+	// No auth header
+	response := httptest.NewRecorder()
+	handler.Send(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestOTPHandlerVerify(t *testing.T) {
 	service := &otpServiceStub{}
 	otpHandler := NewOTPHandler(service)
 
 	request := httptest.NewRequest(http.MethodPost, "/v1/otp/verify", strings.NewReader(`{"phone_number":"+12025550123","code":"012345"}`))
+	request.Header.Set("Authorization", "Bearer valid-key")
+	// Mock the auth middleware by setting tenant context
+	ctx := context.WithValue(request.Context(), auth.AuthContextKey, &auth.AuthenticatedRequest{
+		Request:  request,
+		TenantID: testTenantID,
+	})
+	request = request.WithContext(ctx)
 	response := httptest.NewRecorder()
 	otpHandler.Verify(response, request)
 
@@ -207,6 +246,13 @@ func TestOTPHandlerVerifyRejectsInvalidRequest(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			otpHandler := NewOTPHandler(test.service)
 			request := httptest.NewRequest(test.method, "/v1/otp/verify", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer valid-key")
+			// Mock the auth middleware by setting tenant context
+			ctx := context.WithValue(request.Context(), auth.AuthContextKey, &auth.AuthenticatedRequest{
+				Request:  request,
+				TenantID: testTenantID,
+			})
+			request = request.WithContext(ctx)
 			response := httptest.NewRecorder()
 
 			otpHandler.Verify(response, request)
@@ -229,20 +275,44 @@ func TestOTPHandlerVerifyRejectsInvalidRequest(t *testing.T) {
 	}
 }
 
+func TestOTPHandlerVerifyRejectsMissingAuth(t *testing.T) {
+	service := &otpServiceStub{}
+	otpHandler := NewOTPHandler(service)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/otp/verify", strings.NewReader(`{"phone_number":"+12025550123","code":"012345"}`))
+	// No auth header
+	response := httptest.NewRecorder()
+	otpHandler.Verify(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
 type otpServiceStub struct {
 	issued      otp.IssuedOTP
 	err         error
 	phoneNumber string
 	code        string
+	getParams   otp.GetOTPParams
+	markParams  otp.MarkOTPParams
+	marksUsed   bool
 }
 
-func (s *otpServiceStub) Issue(_ context.Context, phoneNumber string) (otp.IssuedOTP, error) {
+func (s *otpServiceStub) Issue(_ context.Context, tenantID int64, phoneNumber string) (otp.IssuedOTP, error) {
 	s.phoneNumber = phoneNumber
 	return s.issued, s.err
 }
 
-func (s *otpServiceStub) Verify(_ context.Context, phoneNumber, code string) error {
+func (s *otpServiceStub) Verify(_ context.Context, tenantID int64, phoneNumber, code string) error {
 	s.phoneNumber = phoneNumber
 	s.code = code
+	s.getParams = otp.GetOTPParams{PhoneNumber: phoneNumber, TenantID: tenantID}
 	return s.err
+}
+
+func (s *otpServiceStub) MarkAsUsed(_ context.Context, id int64, tenantID int64) error {
+	s.markParams = otp.MarkOTPParams{ID: id, TenantID: tenantID}
+	s.marksUsed = true
+	return nil
 }

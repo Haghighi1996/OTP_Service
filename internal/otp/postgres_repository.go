@@ -13,21 +13,21 @@ import (
 )
 
 const createQuery = `
-	INSERT INTO otps (phone_number, otp_hash, expires_at)
-	VALUES ($1, $2, $3)
+	INSERT INTO otps (phone_number, otp_hash, expires_at, tenant_id)
+	VALUES ($1, $2, $3, $4)
 	RETURNING id, phone_number, otp_hash, expires_at, used_at, created_at`
 
 const getLatestUnusedByPhoneNumberQuery = `
 	SELECT id, phone_number, otp_hash, expires_at, used_at, created_at
 	FROM otps
-	WHERE phone_number = $1 AND used_at IS NULL
+	WHERE phone_number = $1 AND tenant_id = $2 AND used_at IS NULL
 	ORDER BY created_at DESC, id DESC
 	LIMIT 1`
 
 const markAsUsedQuery = `
 	UPDATE otps
 	SET used_at = NOW()
-	WHERE id = $1 AND used_at IS NULL`
+	WHERE id = $1 AND tenant_id = $2 AND used_at IS NULL`
 
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -55,7 +55,7 @@ func (r *PostgresRepository) Create(ctx context.Context, params CreateParams) (O
 	}
 
 	var record OTP
-	err := r.queries.QueryRow(ctx, createQuery, params.PhoneNumber, params.CodeHash, params.ExpiresAt).Scan(
+	err := r.queries.QueryRow(ctx, createQuery, params.PhoneNumber, params.CodeHash, params.ExpiresAt, params.TenantID).Scan(
 		&record.ID,
 		&record.PhoneNumber,
 		&record.CodeHash,
@@ -71,14 +71,14 @@ func (r *PostgresRepository) Create(ctx context.Context, params CreateParams) (O
 }
 
 // GetLatestUnusedByPhoneNumber returns the newest unused OTP for a phone number.
-func (r *PostgresRepository) GetLatestUnusedByPhoneNumber(ctx context.Context, phoneNumber string) (OTP, error) {
-	phoneNumber = strings.TrimSpace(phoneNumber)
+func (r *PostgresRepository) GetLatestUnusedByPhoneNumber(ctx context.Context, params GetOTPParams) (OTP, error) {
+	phoneNumber := strings.TrimSpace(params.PhoneNumber)
 	if phoneNumber == "" {
 		return OTP{}, fmt.Errorf("phone number is required")
 	}
 
 	var record OTP
-	err := r.queries.QueryRow(ctx, getLatestUnusedByPhoneNumberQuery, phoneNumber).Scan(
+	err := r.queries.QueryRow(ctx, getLatestUnusedByPhoneNumberQuery, phoneNumber, params.TenantID).Scan(
 		&record.ID,
 		&record.PhoneNumber,
 		&record.CodeHash,
@@ -98,8 +98,8 @@ func (r *PostgresRepository) GetLatestUnusedByPhoneNumber(ctx context.Context, p
 
 // MarkAsUsed marks the OTP with the given ID as used. Returns ErrOTPNotFound
 // if the OTP was already used or does not exist.
-func (r *PostgresRepository) MarkAsUsed(ctx context.Context, id int64) error {
-	tag, err := r.queries.Exec(ctx, markAsUsedQuery, id)
+func (r *PostgresRepository) MarkAsUsed(ctx context.Context, params MarkOTPParams) error {
+	tag, err := r.queries.Exec(ctx, markAsUsedQuery, params.ID, params.TenantID)
 	if err != nil {
 		return fmt.Errorf("mark OTP as used: %w", err)
 	}
@@ -121,6 +121,9 @@ func validateCreateParams(params CreateParams) error {
 	}
 	if !params.ExpiresAt.After(time.Now()) {
 		return fmt.Errorf("OTP expiration must be in the future")
+	}
+	if params.TenantID == 0 {
+		return fmt.Errorf("tenant ID is required")
 	}
 	return nil
 }

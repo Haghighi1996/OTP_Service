@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const testTenantID = int64(1)
+
 func TestPostgresRepositoryCreateValidation(t *testing.T) {
 	repository := newPostgresRepository(nil)
 
@@ -21,18 +23,23 @@ func TestPostgresRepositoryCreateValidation(t *testing.T) {
 	}{
 		{
 			name:   "missing phone number",
-			params: CreateParams{CodeHash: "hash", ExpiresAt: time.Now().Add(time.Minute)},
+			params: CreateParams{CodeHash: "hash", ExpiresAt: time.Now().Add(time.Minute), TenantID: testTenantID},
 			want:   "phone number is required",
 		},
 		{
 			name:   "missing hash",
-			params: CreateParams{PhoneNumber: "+12025550123", ExpiresAt: time.Now().Add(time.Minute)},
+			params: CreateParams{PhoneNumber: "+12025550123", ExpiresAt: time.Now().Add(time.Minute), TenantID: testTenantID},
 			want:   "OTP hash is required",
 		},
 		{
 			name:   "expired OTP",
-			params: CreateParams{PhoneNumber: "+12025550123", CodeHash: "hash", ExpiresAt: time.Now().Add(-time.Minute)},
+			params: CreateParams{PhoneNumber: "+12025550123", CodeHash: "hash", ExpiresAt: time.Now().Add(-time.Minute), TenantID: testTenantID},
 			want:   "OTP expiration must be in the future",
+		},
+		{
+			name:   "zero tenant ID",
+			params: CreateParams{PhoneNumber: "+12025550123", CodeHash: "hash", ExpiresAt: time.Now().Add(time.Minute), TenantID: 0},
+			want:   "tenant ID is required",
 		},
 	}
 
@@ -71,6 +78,7 @@ func TestPostgresRepositoryCreate(t *testing.T) {
 		PhoneNumber: "+12025550123",
 		CodeHash:    "stored-hash-only",
 		ExpiresAt:   expiresAt,
+		TenantID:    testTenantID,
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -97,7 +105,7 @@ func TestPostgresRepositoryCreate(t *testing.T) {
 func TestPostgresRepositoryGetLatestUnusedByPhoneNumberValidation(t *testing.T) {
 	repository := newPostgresRepository(nil)
 
-	_, err := repository.GetLatestUnusedByPhoneNumber(context.Background(), "  ")
+	_, err := repository.GetLatestUnusedByPhoneNumber(context.Background(), GetOTPParams{})
 	if err == nil || !strings.Contains(err.Error(), "phone number is required") {
 		t.Fatalf("GetLatestUnusedByPhoneNumber() error = %v, want missing phone number", err)
 	}
@@ -125,7 +133,7 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 	repository := newPostgresRepository(tx)
 	phoneNumber := "+12025550999"
 
-	_, err = repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	_, err = repository.GetLatestUnusedByPhoneNumber(ctx, GetOTPParams{PhoneNumber: phoneNumber, TenantID: testTenantID})
 	if !errors.Is(err, ErrOTPNotFound) {
 		t.Fatalf("GetLatestUnusedByPhoneNumber() error = %v, want ErrOTPNotFound", err)
 	}
@@ -134,6 +142,7 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 		PhoneNumber: phoneNumber,
 		CodeHash:    "older-hash",
 		ExpiresAt:   time.Now().UTC().Add(5 * time.Minute),
+		TenantID:    testTenantID,
 	})
 	if err != nil {
 		t.Fatalf("Create() older OTP error = %v", err)
@@ -142,6 +151,7 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 		PhoneNumber: phoneNumber,
 		CodeHash:    "newer-hash",
 		ExpiresAt:   time.Now().UTC().Add(5 * time.Minute),
+		TenantID:    testTenantID,
 	})
 	if err != nil {
 		t.Fatalf("Create() newer OTP error = %v", err)
@@ -150,7 +160,7 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 		t.Fatal("expected distinct OTP records")
 	}
 
-	record, err := repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	record, err := repository.GetLatestUnusedByPhoneNumber(ctx, GetOTPParams{PhoneNumber: phoneNumber, TenantID: testTenantID})
 	if err != nil {
 		t.Fatalf("GetLatestUnusedByPhoneNumber() error = %v", err)
 	}
@@ -158,8 +168,8 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 		t.Errorf("record = %+v, want newest unused OTP", record)
 	}
 
-	_ = repository.MarkAsUsed(ctx, newer.ID)
-	record, err = repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	_ = repository.MarkAsUsed(ctx, MarkOTPParams{ID: newer.ID, TenantID: testTenantID})
+	record, err = repository.GetLatestUnusedByPhoneNumber(ctx, GetOTPParams{PhoneNumber: phoneNumber, TenantID: testTenantID})
 	if err != nil {
 		t.Fatalf("GetLatestUnusedByPhoneNumber() after mark: %v", err)
 	}
@@ -190,7 +200,7 @@ func TestPostgresRepositoryMarkAsUsed(t *testing.T) {
 	repository := newPostgresRepository(tx)
 
 	t.Run("returns ErrOTPNotFound for nonexistent OTP", func(t *testing.T) {
-		err := repository.MarkAsUsed(ctx, 999999)
+		err := repository.MarkAsUsed(ctx, MarkOTPParams{ID: 999999, TenantID: testTenantID})
 		if !errors.Is(err, ErrOTPNotFound) {
 			t.Fatalf("MarkAsUsed() error = %v, want ErrOTPNotFound", err)
 		}
@@ -200,18 +210,19 @@ func TestPostgresRepositoryMarkAsUsed(t *testing.T) {
 		PhoneNumber: "+12025550999",
 		CodeHash:    "stored-hash",
 		ExpiresAt:   time.Now().UTC().Add(5 * time.Minute),
+		TenantID:    testTenantID,
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 
 	t.Run("marks OTP as used", func(t *testing.T) {
-		if err := repository.MarkAsUsed(ctx, record.ID); err != nil {
+		if err := repository.MarkAsUsed(ctx, MarkOTPParams{ID: record.ID, TenantID: testTenantID}); err != nil {
 			t.Fatalf("MarkAsUsed() error = %v", err)
 		}
 
 		var usedAt *time.Time
-		err := tx.QueryRow(ctx, "SELECT used_at FROM otps WHERE id = $1", record.ID).Scan(&usedAt)
+		err := tx.QueryRow(ctx, "SELECT used_at FROM otps WHERE id = $1 AND tenant_id = $2", record.ID, testTenantID).Scan(&usedAt)
 		if err != nil {
 			t.Fatalf("query used_at: %v", err)
 		}
@@ -221,7 +232,7 @@ func TestPostgresRepositoryMarkAsUsed(t *testing.T) {
 	})
 
 	t.Run("returns ErrOTPNotFound when already used", func(t *testing.T) {
-		err := repository.MarkAsUsed(ctx, record.ID)
+		err := repository.MarkAsUsed(ctx, MarkOTPParams{ID: record.ID, TenantID: testTenantID})
 		if !errors.Is(err, ErrOTPNotFound) {
 			t.Fatalf("MarkAsUsed() error = %v, want ErrOTPNotFound", err)
 		}

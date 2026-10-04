@@ -10,9 +10,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type contextKey string
-
-const authContextKey contextKey = "authenticatedRequest"
+// AuthContextKey is the context key used to store authenticated request context.
+var AuthContextKey struct{}
 
 // AuthenticatedRequest represents an HTTP request with authentication context.
 type AuthenticatedRequest struct {
@@ -101,7 +100,7 @@ func CompareAPIKey(key, hash string) bool {
 
 // GetTenantID extracts the tenant ID from an authenticated request context.
 func GetTenantID(ctx context.Context) (int64, bool) {
-	authReq, ok := ctx.Value(authContextKey).(*AuthenticatedRequest)
+	authReq, ok := ctx.Value(AuthContextKey).(*AuthenticatedRequest)
 	if !ok {
 		return 0, false
 	}
@@ -158,7 +157,7 @@ func Middleware(store Store) func(http.Handler) http.Handler {
 			}
 
 			// Add to context and call the next handler
-			ctx := context.WithValue(r.Context(), authContextKey, authReq)
+			ctx := context.WithValue(r.Context(), AuthContextKey, authReq)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
