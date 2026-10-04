@@ -17,5 +17,25 @@ single use explicitly. See [the database design](docs/database-design.md) and
 the canonical [SQL schema](db/schema.sql).
 
 The initial schema is versioned in [migrations](migrations), with an explicit
-Docker workflow documented in [database migrations](docs/migrations.md). The
-Go PostgreSQL connection layer is introduced in a later phase.
+Docker workflow documented in [database migrations](docs/migrations.md).
+
+## Local run
+
+Start PostgreSQL and apply migrations first:
+
+```sh
+docker compose up -d postgres
+make migration-up
+```
+
+Then provide a database URL and start the server:
+
+```sh
+export DATABASE_URL='postgres://otp_user:otp_password@localhost:5432/otp_db?sslmode=disable'
+go run ./cmd/server
+```
+
+The server verifies PostgreSQL connectivity before accepting requests and
+closes its connection pool during graceful shutdown. The optional pool settings
+are `DB_MAX_CONNS`, `DB_MIN_CONNS`, `DB_MAX_CONN_LIFETIME`,
+`DB_MAX_CONN_IDLE_TIME`, and `DB_HEALTH_CHECK_PERIOD`.

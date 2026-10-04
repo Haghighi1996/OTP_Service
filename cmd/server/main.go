@@ -2,31 +2,69 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
-	"os"
 	"os/signal"
+	"otp-service/internal/config"
+	"otp-service/internal/database"
 	"otp-service/internal/handler"
 	"syscall"
 	"time"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
-	http.HandleFunc("/healthz", handler.HealthHandler)
-	http.HandleFunc("/v1/otp/send", handler.SendOTPHandler)
+func run() error {
+	settings, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	appContext, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	connectContext, cancelConnect := context.WithTimeout(appContext, 10*time.Second)
+	defer cancelConnect()
+
+	pool, err := database.NewPool(connectContext, settings)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", handler.HealthHandler)
+	mux.HandleFunc("/v1/otp/send", handler.SendOTPHandler)
 
 	server := &http.Server{
-		Addr:    ":8080",
-		Handler: http.DefaultServeMux,
+		Addr:    settings.HTTPAddr,
+		Handler: mux,
 	}
-	go server.ListenAndServe()
 
-	sigchan := make(chan os.Signal, 1)
-	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigchan
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		// handle error
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErrors:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("run HTTP server: %w", err)
+		}
+		return nil
+	case <-appContext.Done():
+		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelShutdown()
+
+		if err := server.Shutdown(shutdownContext); err != nil {
+			return fmt.Errorf("shut down HTTP server: %w", err)
+		}
+		return nil
 	}
 }
