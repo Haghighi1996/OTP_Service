@@ -2,6 +2,7 @@ package otp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,13 @@ const createQuery = `
 	INSERT INTO otps (phone_number, otp_hash, expires_at)
 	VALUES ($1, $2, $3)
 	RETURNING id, phone_number, otp_hash, expires_at, used_at, created_at`
+
+const getLatestUnusedByPhoneNumberQuery = `
+	SELECT id, phone_number, otp_hash, expires_at, used_at, created_at
+	FROM otps
+	WHERE phone_number = $1 AND used_at IS NULL
+	ORDER BY created_at DESC, id DESC
+	LIMIT 1`
 
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -50,6 +58,32 @@ func (r *PostgresRepository) Create(ctx context.Context, params CreateParams) (O
 	)
 	if err != nil {
 		return OTP{}, fmt.Errorf("create OTP: %w", err)
+	}
+
+	return record, nil
+}
+
+// GetLatestUnusedByPhoneNumber returns the newest unused OTP for a phone number.
+func (r *PostgresRepository) GetLatestUnusedByPhoneNumber(ctx context.Context, phoneNumber string) (OTP, error) {
+	phoneNumber = strings.TrimSpace(phoneNumber)
+	if phoneNumber == "" {
+		return OTP{}, fmt.Errorf("phone number is required")
+	}
+
+	var record OTP
+	err := r.queries.QueryRow(ctx, getLatestUnusedByPhoneNumberQuery, phoneNumber).Scan(
+		&record.ID,
+		&record.PhoneNumber,
+		&record.CodeHash,
+		&record.ExpiresAt,
+		&record.UsedAt,
+		&record.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OTP{}, ErrOTPNotFound
+	}
+	if err != nil {
+		return OTP{}, fmt.Errorf("get latest unused OTP: %w", err)
 	}
 
 	return record, nil

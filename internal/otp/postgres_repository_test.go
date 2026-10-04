@@ -2,6 +2,7 @@ package otp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -90,5 +91,70 @@ func TestPostgresRepositoryCreate(t *testing.T) {
 	}
 	if record.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
+	}
+}
+
+func TestPostgresRepositoryGetLatestUnusedByPhoneNumberValidation(t *testing.T) {
+	repository := newPostgresRepository(nil)
+
+	_, err := repository.GetLatestUnusedByPhoneNumber(context.Background(), "  ")
+	if err == nil || !strings.Contains(err.Error(), "phone number is required") {
+		t.Fatalf("GetLatestUnusedByPhoneNumber() error = %v, want missing phone number", err)
+	}
+}
+
+func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	defer pool.Close()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	repository := newPostgresRepository(tx)
+	phoneNumber := "+12025550999"
+
+	_, err = repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	if !errors.Is(err, ErrOTPNotFound) {
+		t.Fatalf("GetLatestUnusedByPhoneNumber() error = %v, want ErrOTPNotFound", err)
+	}
+
+	older, err := repository.Create(ctx, CreateParams{
+		PhoneNumber: phoneNumber,
+		CodeHash:    "older-hash",
+		ExpiresAt:   time.Now().UTC().Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Create() older OTP error = %v", err)
+	}
+	newer, err := repository.Create(ctx, CreateParams{
+		PhoneNumber: phoneNumber,
+		CodeHash:    "newer-hash",
+		ExpiresAt:   time.Now().UTC().Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Create() newer OTP error = %v", err)
+	}
+	if older.ID == newer.ID {
+		t.Fatal("expected distinct OTP records")
+	}
+
+	record, err := repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	if err != nil {
+		t.Fatalf("GetLatestUnusedByPhoneNumber() error = %v", err)
+	}
+	if record.ID != newer.ID || record.CodeHash != "newer-hash" {
+		t.Errorf("record = %+v, want newest unused OTP", record)
 	}
 }

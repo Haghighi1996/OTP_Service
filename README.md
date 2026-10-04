@@ -15,6 +15,7 @@ developed incrementally as a production-minded modular monolith.
 - Phase 2.7: OTP hashing and comparison — complete.
 - Phase 2.8: OTP service layer — complete.
 - Phase 2.9: Send OTP API — complete.
+- Phase 2.10: Verify OTP API — complete.
 
 ## Database schema
 
@@ -53,12 +54,18 @@ The PostgreSQL implementation stores only the supplied OTP hash and returns the
 database-generated record. OTP generation uses `crypto/rand` to produce numeric
 codes without predictable randomness. OTPs are hashed with bcrypt before they
 reach persistence. The service layer validates E.164 phone numbers, issues
-five-minute OTPs, and coordinates persistence. The API issuance flow is ready;
-an external delivery provider and verification flow are implemented in later
-phases.
+five-minute OTPs, and verifies submitted codes against the newest unused hash.
+The API send and verify flows are in place; expiration, one-time consumption,
+and an external delivery provider are implemented in later phases.
 
 ## API
 
 `POST /v1/otp/send` accepts an E.164 phone number and creates an OTP record.
 It responds with `202 Accepted` and the expiry timestamp; the plaintext OTP is
 never included in an API response.
+
+`POST /v1/otp/verify` accepts an E.164 phone number and numeric OTP code. A
+matching unused OTP returns `200 OK`. Malformed requests return `400 Bad
+Request`. An unknown phone number or non-matching code returns `401
+Unauthorized` with a generic invalid OTP error so the API does not reveal
+whether a record exists.

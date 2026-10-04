@@ -46,6 +46,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.HealthHandler)
 	mux.HandleFunc("/v1/otp/send", otpHandler.Send)
+	mux.HandleFunc("/v1/otp/verify", otpHandler.Verify)
 
 	server := &http.Server{
 		Addr:    settings.HTTPAddr,

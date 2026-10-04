@@ -15,7 +15,7 @@ import (
 
 func TestOTPHandlerSend(t *testing.T) {
 	expiresAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
-	issuer := &issuerStub{result: otp.IssuedOTP{
+	issuer := &otpServiceStub{issued: otp.IssuedOTP{
 		Record: otp.OTP{ExpiresAt: expiresAt},
 		Code:   "012345",
 	}}
@@ -52,34 +52,34 @@ func TestOTPHandlerSendRejectsInvalidRequest(t *testing.T) {
 		name   string
 		method string
 		body   string
-		issuer *issuerStub
+		issuer *otpServiceStub
 		want   int
 	}{
 		{
 			name:   "unsupported method",
 			method: http.MethodGet,
-			issuer: &issuerStub{},
+			issuer: &otpServiceStub{},
 			want:   http.StatusMethodNotAllowed,
 		},
 		{
 			name:   "unknown field",
 			method: http.MethodPost,
 			body:   `{"phone_number":"+12025550123","unexpected":true}`,
-			issuer: &issuerStub{},
+			issuer: &otpServiceStub{},
 			want:   http.StatusBadRequest,
 		},
 		{
 			name:   "invalid phone number",
 			method: http.MethodPost,
 			body:   `{"phone_number":"invalid"}`,
-			issuer: &issuerStub{err: otp.ErrInvalidPhoneNumber},
+			issuer: &otpServiceStub{err: otp.ErrInvalidPhoneNumber},
 			want:   http.StatusBadRequest,
 		},
 		{
 			name:   "service failure",
 			method: http.MethodPost,
 			body:   `{"phone_number":"+12025550123"}`,
-			issuer: &issuerStub{err: errors.New("database unavailable")},
+			issuer: &otpServiceStub{err: errors.New("database unavailable")},
 			want:   http.StatusInternalServerError,
 		},
 	}
@@ -102,13 +102,139 @@ func TestOTPHandlerSendRejectsInvalidRequest(t *testing.T) {
 	}
 }
 
-type issuerStub struct {
-	result      otp.IssuedOTP
-	err         error
-	phoneNumber string
+func TestOTPHandlerVerify(t *testing.T) {
+	service := &otpServiceStub{}
+	otpHandler := NewOTPHandler(service)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/otp/verify", strings.NewReader(`{"phone_number":"+12025550123","code":"012345"}`))
+	response := httptest.NewRecorder()
+	otpHandler.Verify(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if service.phoneNumber != "+12025550123" || service.code != "012345" {
+		t.Errorf("verify args = (%q, %q), want request values", service.phoneNumber, service.code)
+	}
+	if response.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", response.Header().Get("Content-Type"))
+	}
+
+	var body verifyOTPResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "verified" {
+		t.Errorf("response = %+v, want verified status", body)
+	}
 }
 
-func (s *issuerStub) Issue(_ context.Context, phoneNumber string) (otp.IssuedOTP, error) {
+func TestOTPHandlerVerifyRejectsInvalidRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		method  string
+		body    string
+		service *otpServiceStub
+		want    int
+		error   string
+	}{
+		{
+			name:    "unsupported method",
+			method:  http.MethodGet,
+			service: &otpServiceStub{},
+			want:    http.StatusMethodNotAllowed,
+			error:   "method not allowed",
+		},
+		{
+			name:    "invalid JSON",
+			method:  http.MethodPost,
+			body:    `{"phone_number":`,
+			service: &otpServiceStub{},
+			want:    http.StatusBadRequest,
+			error:   "invalid request body",
+		},
+		{
+			name:    "unknown field",
+			method:  http.MethodPost,
+			body:    `{"phone_number":"+12025550123","code":"012345","unexpected":true}`,
+			service: &otpServiceStub{},
+			want:    http.StatusBadRequest,
+			error:   "invalid request body",
+		},
+		{
+			name:    "invalid phone number",
+			method:  http.MethodPost,
+			body:    `{"phone_number":"invalid","code":"012345"}`,
+			service: &otpServiceStub{err: otp.ErrInvalidPhoneNumber},
+			want:    http.StatusBadRequest,
+			error:   "invalid phone number",
+		},
+		{
+			name:    "invalid code format",
+			method:  http.MethodPost,
+			body:    `{"phone_number":"+12025550123","code":"abc"}`,
+			service: &otpServiceStub{err: otp.ErrInvalidCode},
+			want:    http.StatusBadRequest,
+			error:   "invalid OTP code",
+		},
+		{
+			name:    "invalid OTP",
+			method:  http.MethodPost,
+			body:    `{"phone_number":"+12025550123","code":"012345"}`,
+			service: &otpServiceStub{err: otp.ErrInvalidOTP},
+			want:    http.StatusUnauthorized,
+			error:   "invalid OTP",
+		},
+		{
+			name:    "service failure",
+			method:  http.MethodPost,
+			body:    `{"phone_number":"+12025550123","code":"012345"}`,
+			service: &otpServiceStub{err: errors.New("database unavailable")},
+			want:    http.StatusInternalServerError,
+			error:   "unable to verify OTP",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			otpHandler := NewOTPHandler(test.service)
+			request := httptest.NewRequest(test.method, "/v1/otp/verify", strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+
+			otpHandler.Verify(response, request)
+
+			if response.Code != test.want {
+				t.Errorf("status = %d, want %d", response.Code, test.want)
+			}
+			if test.method != http.MethodPost && response.Header().Get("Allow") != http.MethodPost {
+				t.Errorf("Allow = %q, want %q", response.Header().Get("Allow"), http.MethodPost)
+			}
+
+			var body errorResponse
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body.Error != test.error {
+				t.Errorf("error = %q, want %q", body.Error, test.error)
+			}
+		})
+	}
+}
+
+type otpServiceStub struct {
+	issued      otp.IssuedOTP
+	err         error
+	phoneNumber string
+	code        string
+}
+
+func (s *otpServiceStub) Issue(_ context.Context, phoneNumber string) (otp.IssuedOTP, error) {
 	s.phoneNumber = phoneNumber
-	return s.result, s.err
+	return s.issued, s.err
+}
+
+func (s *otpServiceStub) Verify(_ context.Context, phoneNumber, code string) error {
+	s.phoneNumber = phoneNumber
+	s.code = code
+	return s.err
 }

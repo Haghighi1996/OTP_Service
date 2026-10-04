@@ -10,7 +10,10 @@ import (
 
 const DefaultTTL = 5 * time.Minute
 
-var ErrInvalidPhoneNumber = errors.New("phone number must use E.164 format")
+var (
+	ErrInvalidPhoneNumber = errors.New("phone number must use E.164 format")
+	ErrInvalidOTP         = errors.New("invalid OTP")
+)
 
 // IssuedOTP is the result of issuing an OTP. Code is plaintext only so a later
 // delivery adapter can send it; it must never be persisted or returned by the
@@ -25,6 +28,7 @@ type Service struct {
 	repository Repository
 	generate   func(int) (string, error)
 	hash       func(string) (string, error)
+	compare    func(string, string) (bool, error)
 	now        func() time.Time
 	codeLength int
 	ttl        time.Duration
@@ -32,13 +36,14 @@ type Service struct {
 
 // NewService creates an OTP service with production defaults.
 func NewService(repository Repository) *Service {
-	return newService(repository, GenerateCode, HashCode, time.Now, DefaultCodeLength, DefaultTTL)
+	return newService(repository, GenerateCode, HashCode, VerifyCode, time.Now, DefaultCodeLength, DefaultTTL)
 }
 
 func newService(
 	repository Repository,
 	generate func(int) (string, error),
 	hash func(string) (string, error),
+	compare func(string, string) (bool, error),
 	now func() time.Time,
 	codeLength int,
 	ttl time.Duration,
@@ -47,6 +52,7 @@ func newService(
 		repository: repository,
 		generate:   generate,
 		hash:       hash,
+		compare:    compare,
 		now:        now,
 		codeLength: codeLength,
 		ttl:        ttl,
@@ -80,6 +86,41 @@ func (s *Service) Issue(ctx context.Context, phoneNumber string) (IssuedOTP, err
 	}
 
 	return IssuedOTP{Record: record, Code: code}, nil
+}
+
+// Verify checks a submitted OTP against the newest unused record for a phone
+// number. Expiration and one-time consumption are handled in a later phase.
+func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
+	phoneNumber = strings.TrimSpace(phoneNumber)
+	if !isE164PhoneNumber(phoneNumber) {
+		return ErrInvalidPhoneNumber
+	}
+
+	code = strings.TrimSpace(code)
+	if err := validateCode(code); err != nil {
+		return ErrInvalidCode
+	}
+
+	record, err := s.repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	if errors.Is(err, ErrOTPNotFound) {
+		return ErrInvalidOTP
+	}
+	if err != nil {
+		return fmt.Errorf("load OTP: %w", err)
+	}
+
+	matches, err := s.compare(code, record.CodeHash)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCode) {
+			return ErrInvalidCode
+		}
+		return fmt.Errorf("compare OTP: %w", err)
+	}
+	if !matches {
+		return ErrInvalidOTP
+	}
+
+	return nil
 }
 
 func isE164PhoneNumber(phoneNumber string) bool {
