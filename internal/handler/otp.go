@@ -127,6 +127,10 @@ func (h *OTPHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid OTP"})
 		return
 	}
+	if errors.Is(err, otp.ErrOTPExpired) {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "OTP expired"})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "unable to verify OTP"})
 		return

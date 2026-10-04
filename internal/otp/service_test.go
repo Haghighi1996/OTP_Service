@@ -129,7 +129,8 @@ func TestServiceIssueReturnsRepositoryError(t *testing.T) {
 }
 
 func TestServiceVerify(t *testing.T) {
-	repository := &repositoryStub{record: OTP{CodeHash: "stored-hash"}}
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	repository := &repositoryStub{record: OTP{CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)}}
 	service := newService(
 		repository,
 		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
@@ -140,7 +141,7 @@ func TestServiceVerify(t *testing.T) {
 			}
 			return true, nil
 		},
-		time.Now,
+		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
 	)
@@ -150,6 +151,78 @@ func TestServiceVerify(t *testing.T) {
 	}
 	if repository.phoneNumber != "+12025550123" {
 		t.Errorf("phone number = %q, want normalized input", repository.phoneNumber)
+	}
+	if !repository.marksUsed {
+		t.Error("OTP should be marked as used after successful verification")
+	}
+}
+
+func TestServiceVerifyMarksOTPAsUsed(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	repository := &repositoryStub{record: OTP{ID: 42, CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)}}
+	service := newService(
+		repository,
+		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+		func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+		func(string, string) (bool, error) { return true, nil },
+		func() time.Time { return now },
+		DefaultCodeLength,
+		DefaultTTL,
+	)
+
+	if err := service.Verify(context.Background(), "+12025550123", "012345"); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if !repository.marksUsed {
+		t.Error("OTP should be marked as used after successful verification")
+	}
+	if repository.markedID != 42 {
+		t.Errorf("markedID = %d, want 42", repository.markedID)
+	}
+}
+
+func TestServiceVerifyRejectsExpiredOTP(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	// The OTP was created 6 minutes ago with a 5-minute TTL, so it is expired.
+	repository := &repositoryStub{record: OTP{CodeHash: "stored-hash", ExpiresAt: now.Add(-time.Minute)}}
+	service := newService(
+		repository,
+		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+		func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+		func(string, string) (bool, error) { t.Fatal("compare should not run"); return false, nil },
+		func() time.Time { return now },
+		DefaultCodeLength,
+		DefaultTTL,
+	)
+
+	err := service.Verify(context.Background(), "+12025550123", "012345")
+	if !errors.Is(err, ErrOTPExpired) {
+		t.Fatalf("Verify() error = %v, want ErrOTPExpired", err)
+	}
+	if repository.marksUsed {
+		t.Error("expired OTP should not be marked as used")
+	}
+}
+
+func TestServiceVerifyReturnsErrInvalidOTPOnFailedMarkAsUsed(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	repository := &repositoryStub{
+		record:       OTP{ID: 42, CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)},
+		markUsedErr:  ErrOTPNotFound,
+	}
+	service := newService(
+		repository,
+		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+		func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+		func(string, string) (bool, error) { return true, nil },
+		func() time.Time { return now },
+		DefaultCodeLength,
+		DefaultTTL,
+	)
+
+	err := service.Verify(context.Background(), "+12025550123", "012345")
+	if !errors.Is(err, ErrInvalidOTP) {
+		t.Fatalf("Verify() error = %v, want ErrInvalidOTP", err)
 	}
 }
 
@@ -189,20 +262,27 @@ func TestServiceVerifyRejectsInvalidInput(t *testing.T) {
 }
 
 func TestServiceVerifyRejectsUnknownOrMismatchedOTP(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	tests := []struct {
 		name       string
 		repository *repositoryStub
 		compare    func(string, string) (bool, error)
+		wantErr    error
 	}{
 		{
 			name:       "missing OTP",
 			repository: &repositoryStub{err: ErrOTPNotFound},
 			compare:    func(string, string) (bool, error) { t.Fatal("compare should not run"); return false, nil },
+			wantErr:    ErrInvalidOTP,
 		},
 		{
-			name:       "mismatched OTP",
-			repository: &repositoryStub{record: OTP{CodeHash: "stored-hash"}},
-			compare:    func(string, string) (bool, error) { return false, nil },
+			name: "mismatched OTP",
+			repository: &repositoryStub{
+				record:      OTP{CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)},
+				markUsedErr: ErrOTPNotFound,
+			},
+			compare: func(string, string) (bool, error) { return false, nil },
+			wantErr: ErrInvalidOTP,
 		},
 	}
 
@@ -213,14 +293,14 @@ func TestServiceVerifyRejectsUnknownOrMismatchedOTP(t *testing.T) {
 				func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
 				func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
 				test.compare,
-				time.Now,
+				func() time.Time { return now },
 				DefaultCodeLength,
 				DefaultTTL,
 			)
 
 			err := service.Verify(context.Background(), "+12025550123", "012345")
-			if !errors.Is(err, ErrInvalidOTP) {
-				t.Fatalf("Verify() error = %v, want ErrInvalidOTP", err)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("Verify() error = %v, want %v", err, test.wantErr)
 			}
 		})
 	}
@@ -250,6 +330,9 @@ type repositoryStub struct {
 	record      OTP
 	err         error
 	called      bool
+	marksUsed   bool
+	markedID    int64
+	markUsedErr error
 }
 
 func (r *repositoryStub) Create(_ context.Context, params CreateParams) (OTP, error) {
@@ -262,4 +345,13 @@ func (r *repositoryStub) GetLatestUnusedByPhoneNumber(_ context.Context, phoneNu
 	r.called = true
 	r.phoneNumber = phoneNumber
 	return r.record, r.err
+}
+
+func (r *repositoryStub) MarkAsUsed(_ context.Context, id int64) error {
+	r.marksUsed = true
+	r.markedID = id
+	if r.markUsedErr != nil {
+		return r.markUsedErr
+	}
+	return nil
 }

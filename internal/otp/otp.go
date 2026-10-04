@@ -9,6 +9,9 @@ import (
 // ErrOTPNotFound is returned when no unused OTP exists for a phone number.
 var ErrOTPNotFound = errors.New("OTP not found")
 
+// ErrOTPExpired is returned when the OTP has expired.
+var ErrOTPExpired = errors.New("OTP expired")
+
 // OTP is a persisted one-time password record. CodeHash is always a hash; the
 // plaintext code is intentionally not part of the domain model.
 type OTP struct {
@@ -31,4 +34,5 @@ type CreateParams struct {
 type Repository interface {
 	Create(context.Context, CreateParams) (OTP, error)
 	GetLatestUnusedByPhoneNumber(context.Context, string) (OTP, error)
+	MarkAsUsed(context.Context, int64) error
 }

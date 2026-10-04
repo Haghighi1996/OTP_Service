@@ -186,6 +186,14 @@ func TestOTPHandlerVerifyRejectsInvalidRequest(t *testing.T) {
 			error:   "invalid OTP",
 		},
 		{
+			name:    "expired OTP",
+			method:  http.MethodPost,
+			body:    `{"phone_number":"+12025550123","code":"012345"}`,
+			service: &otpServiceStub{err: otp.ErrOTPExpired},
+			want:    http.StatusUnauthorized,
+			error:   "OTP expired",
+		},
+		{
 			name:    "service failure",
 			method:  http.MethodPost,
 			body:    `{"phone_number":"+12025550123","code":"012345"}`,

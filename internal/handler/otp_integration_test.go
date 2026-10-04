@@ -79,3 +79,53 @@ func TestOTPVerifyHTTPFlow(t *testing.T) {
 		t.Fatalf("missing OTP status = %d, want %d", missingResponse.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestOTPVerifyHTTPExpired(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	defer pool.Close()
+
+	repository := otp.NewPostgresRepository(pool)
+	service := otp.NewService(repository)
+	otpHandler := NewOTPHandler(service)
+
+	phoneNumber := "+12025550178"
+	_, _ = pool.Exec(ctx, "DELETE FROM otps WHERE phone_number = $1", phoneNumber)
+	defer pool.Exec(ctx, "DELETE FROM otps WHERE phone_number = $1", phoneNumber)
+
+	codeHash, err := otp.HashCode("012345")
+	if err != nil {
+		t.Fatalf("HashCode() error = %v", err)
+	}
+	// Insert directly with a past expiration to bypass Create's validation.
+	expiredAt := time.Now().UTC().Add(-10 * time.Minute)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO otps (phone_number, otp_hash, expires_at, created_at)
+		VALUES ($1, $2, $3, $4)`, phoneNumber, codeHash, expiredAt, expiredAt.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("insert expired OTP: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/otp/verify", bytes.NewBufferString(`{"phone_number":"+12025550178","code":"012345"}`))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	otpHandler.Verify(response, req)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expired OTP status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+	var body errorResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != "OTP expired" {
+		t.Errorf("error = %q, want %q", body.Error, "OTP expired")
+	}
+}

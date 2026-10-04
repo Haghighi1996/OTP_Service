@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,8 +24,14 @@ const getLatestUnusedByPhoneNumberQuery = `
 	ORDER BY created_at DESC, id DESC
 	LIMIT 1`
 
+const markAsUsedQuery = `
+	UPDATE otps
+	SET used_at = NOW()
+	WHERE id = $1 AND used_at IS NULL`
+
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 // PostgresRepository stores OTP records in PostgreSQL.
@@ -87,6 +94,19 @@ func (r *PostgresRepository) GetLatestUnusedByPhoneNumber(ctx context.Context, p
 	}
 
 	return record, nil
+}
+
+// MarkAsUsed marks the OTP with the given ID as used. Returns ErrOTPNotFound
+// if the OTP was already used or does not exist.
+func (r *PostgresRepository) MarkAsUsed(ctx context.Context, id int64) error {
+	tag, err := r.queries.Exec(ctx, markAsUsedQuery, id)
+	if err != nil {
+		return fmt.Errorf("mark OTP as used: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOTPNotFound
+	}
+	return nil
 }
 
 func validateCreateParams(params CreateParams) error {

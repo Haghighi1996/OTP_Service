@@ -89,7 +89,7 @@ func (s *Service) Issue(ctx context.Context, phoneNumber string) (IssuedOTP, err
 }
 
 // Verify checks a submitted OTP against the newest unused record for a phone
-// number. Expiration and one-time consumption are handled in a later phase.
+// number. Expiration and one-time consumption are enforced in this method.
 func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
 	phoneNumber = strings.TrimSpace(phoneNumber)
 	if !isE164PhoneNumber(phoneNumber) {
@@ -109,6 +109,10 @@ func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
 		return fmt.Errorf("load OTP: %w", err)
 	}
 
+	if record.ExpiresAt.Before(s.now()) {
+		return ErrOTPExpired
+	}
+
 	matches, err := s.compare(code, record.CodeHash)
 	if err != nil {
 		if errors.Is(err, ErrInvalidCode) {
@@ -118,6 +122,15 @@ func (s *Service) Verify(ctx context.Context, phoneNumber, code string) error {
 	}
 	if !matches {
 		return ErrInvalidOTP
+	}
+
+	if err := s.repository.MarkAsUsed(ctx, record.ID); err != nil {
+		if errors.Is(err, ErrOTPNotFound) {
+			// This can happen in a race condition where the OTP was used by
+			// another request after we loaded it but before we marked it.
+			return ErrInvalidOTP
+		}
+		return fmt.Errorf("mark OTP as used: %w", err)
 	}
 
 	return nil
