@@ -17,6 +17,7 @@ const maxRequestBodyBytes = 1 << 20
 type otpService interface {
 	Issue(context.Context, int64, string) (otp.IssuedOTP, error)
 	Verify(context.Context, int64, string, string) error
+	VerifyAtomic(context.Context, int64, string, string) error
 }
 
 // OTPHandler exposes HTTP endpoints for OTP operations.
@@ -127,7 +128,7 @@ func (h *OTPHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.service.Verify(r.Context(), tenantID, request.PhoneNumber, request.Code)
+	err := h.service.VerifyAtomic(r.Context(), tenantID, request.PhoneNumber, request.Code)
 	if errors.Is(err, otp.ErrInvalidPhoneNumber) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid phone number"})
 		return

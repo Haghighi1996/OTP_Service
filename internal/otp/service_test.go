@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-)
 
-const testTenantID = int64(1)
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
 
 func TestServiceIssue(t *testing.T) {
 	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -375,6 +377,120 @@ func TestServiceVerifyRejectsZeroTenantID(t *testing.T) {
 	}
 }
 
+// TestServiceVerifyAtomicConcurrentConsumption ensures that concurrent
+// verification of the same OTP cannot consume it twice.
+// Exactly one caller should succeed; all others must receive ErrInvalidOTP.
+func TestServiceVerifyAtomicConcurrentConsumption(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	storedHash := "stored-hash"
+	record := OTP{ID: 42, CodeHash: storedHash, ExpiresAt: now.Add(DefaultTTL)}
+
+	var successCount int32
+	var failCount int32
+	var mu sync.Mutex
+
+	// Run 20 concurrent verification attempts against the same OTP.
+	const concurrency = 20
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			defer wg.Done()
+			repo := &repositoryStub{record: record}
+			svc := newService(
+				repo,
+				func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+				func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+				func(code, hash string) (bool, error) {
+					if code != "012345" || hash != storedHash {
+						t.Errorf("compare(%q, %q), want (012345, stored-hash)", code, hash)
+					}
+					return true, nil
+				},
+				func() time.Time { return now },
+				DefaultCodeLength,
+				DefaultTTL,
+			)
+
+			err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "012345")
+			mu.Lock()
+			if err == nil {
+				successCount++
+			} else {
+				failCount++
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 successful verification, got %d", successCount)
+	}
+	if failCount != concurrency-1 {
+		t.Fatalf("expected %d failures, got %d", concurrency-1, failCount)
+	}
+	mu.Unlock()
+}
+
+func TestServiceVerifyAtomicRejectsExpiredOTP(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	repo := &repositoryStub{record: OTP{CodeHash: "stored-hash", ExpiresAt: now.Add(-time.Minute)}}
+	svc := newService(
+		repo,
+		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+		func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+		func(string, string) (bool, error) { t.Fatal("compare should not run"); return false, nil },
+		func() time.Time { return now },
+		DefaultCodeLength,
+		DefaultTTL,
+	)
+
+	err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "012345")
+	if !errors.Is(err, ErrOTPExpired) {
+		t.Fatalf("VerifyAtomic() error = %v, want ErrOTPExpired", err)
+	}
+}
+
+func TestServiceVerifyAtomicRejectsInvalidCode(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	repo := &repositoryStub{record: OTP{CodeHash: "stored-hash", ExpiresAt: now.Add(DefaultTTL)}}
+	svc := newService(
+		repo,
+		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+		func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+		func(string, string) (bool, error) { return false, nil },
+		func() time.Time { return now },
+		DefaultCodeLength,
+		DefaultTTL,
+	)
+
+	err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "wrong")
+	if !errors.Is(err, ErrInvalidOTP) {
+		t.Fatalf("VerifyAtomic() error = %v, want ErrInvalidOTP", err)
+	}
+}
+
+func TestServiceVerifyAtomicRejectsMissingOTP(t *testing.T) {
+	repo := &repositoryStub{err: ErrOTPNotFound}
+	svc := newService(
+		repo,
+		func(int) (string, error) { t.Fatal("generator should not run"); return "", nil },
+		func(string) (string, error) { t.Fatal("hasher should not run"); return "", nil },
+		func(string, string) (bool, error) { t.Fatal("compare should not run"); return false, nil },
+		time.Now,
+		DefaultCodeLength,
+		DefaultTTL,
+	)
+
+	err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "012345")
+	if !errors.Is(err, ErrInvalidOTP) {
+		t.Fatalf("VerifyAtomic() error = %v, want ErrInvalidOTP", err)
+	}
+}
+
 type repositoryStub struct {
 	params      CreateParams
 	getParams   GetOTPParams
@@ -408,3 +524,26 @@ func (r *repositoryStub) MarkAsUsed(_ context.Context, params MarkOTPParams) err
 	}
 	return nil
 }
+
+func (r *repositoryStub) AtomicVerify(_ context.Context, _ AtomicVerifyParams) (OTP, bool, error) {
+	return r.record, true, r.err
+}
+
+func (r *repositoryStub) BeginTx(_ context.Context) (Tx, error) {
+	return &txStub{}, r.err
+}
+
+func (r *repositoryStub) GetLatestUnusedForUpdate(_ context.Context, _ Tx, _ GetOTPParams) (OTP, bool, error) {
+	return r.record, true, r.err
+}
+
+func (r *repositoryStub) MarkAsUsedInTx(_ context.Context, _ Tx, _ MarkOTPParams) error {
+	return nil
+}
+
+type txStub struct{}
+
+func (t *txStub) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row { return nil }
+func (t *txStub) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag(""), nil }
+func (t *txStub) Commit(_ context.Context) error                         { return nil }
+func (t *txStub) Rollback(_ context.Context) error                       { return nil }

@@ -14,7 +14,7 @@ import (
 const testTenantID = int64(1)
 
 func TestPostgresRepositoryCreateValidation(t *testing.T) {
-	repository := newPostgresRepository(nil)
+	repository := newPostgresRepository(nil, nil)
 
 	tests := []struct {
 		name   string
@@ -72,7 +72,7 @@ func TestPostgresRepositoryCreate(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	repository := newPostgresRepository(tx)
+	repository := newPostgresRepository(tx, nil)
 	expiresAt := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Microsecond)
 	record, err := repository.Create(ctx, CreateParams{
 		PhoneNumber: "+12025550123",
@@ -103,7 +103,7 @@ func TestPostgresRepositoryCreate(t *testing.T) {
 }
 
 func TestPostgresRepositoryGetLatestUnusedByPhoneNumberValidation(t *testing.T) {
-	repository := newPostgresRepository(nil)
+	repository := newPostgresRepository(nil, nil)
 
 	_, err := repository.GetLatestUnusedByPhoneNumber(context.Background(), GetOTPParams{})
 	if err == nil || !strings.Contains(err.Error(), "phone number is required") {
@@ -130,7 +130,7 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	repository := newPostgresRepository(tx)
+	repository := newPostgresRepository(tx, nil)
 	phoneNumber := "+12025550999"
 
 	_, err = repository.GetLatestUnusedByPhoneNumber(ctx, GetOTPParams{PhoneNumber: phoneNumber, TenantID: testTenantID})
@@ -197,7 +197,7 @@ func TestPostgresRepositoryMarkAsUsed(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	repository := newPostgresRepository(tx)
+	repository := newPostgresRepository(tx, nil)
 
 	t.Run("returns ErrOTPNotFound for nonexistent OTP", func(t *testing.T) {
 		err := repository.MarkAsUsed(ctx, MarkOTPParams{ID: 999999, TenantID: testTenantID})

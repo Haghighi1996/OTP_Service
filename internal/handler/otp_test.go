@@ -311,6 +311,13 @@ func (s *otpServiceStub) Verify(_ context.Context, tenantID int64, phoneNumber, 
 	return s.err
 }
 
+func (s *otpServiceStub) VerifyAtomic(_ context.Context, tenantID int64, phoneNumber, code string) error {
+	s.phoneNumber = phoneNumber
+	s.code = code
+	s.getParams = otp.GetOTPParams{PhoneNumber: phoneNumber, TenantID: tenantID}
+	return s.err
+}
+
 func (s *otpServiceStub) MarkAsUsed(_ context.Context, id int64, tenantID int64) error {
 	s.markParams = otp.MarkOTPParams{ID: id, TenantID: tenantID}
 	s.marksUsed = true

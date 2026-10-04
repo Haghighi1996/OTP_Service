@@ -95,6 +95,8 @@ func (s *Service) Issue(ctx context.Context, tenantID int64, phoneNumber string)
 
 // Verify checks a submitted OTP against the newest unused record for a phone
 // number. Expiration and one-time consumption are enforced in this method.
+// This method uses a non-atomic approach that is safe but may do unnecessary
+// bcrypt comparisons under concurrent verification requests.
 func (s *Service) Verify(ctx context.Context, tenantID int64, phoneNumber, code string) error {
 	phoneNumber = strings.TrimSpace(phoneNumber)
 	if !isE164PhoneNumber(phoneNumber) {
@@ -143,6 +145,83 @@ func (s *Service) Verify(ctx context.Context, tenantID int64, phoneNumber, code 
 			return ErrInvalidOTP
 		}
 		return fmt.Errorf("mark OTP as used: %w", err)
+	}
+
+	return nil
+}
+
+// VerifyAtomic verifies an OTP using a transaction with row-level locking.
+// It uses SELECT ... FOR UPDATE SKIP LOCKED to atomically lock the OTP row,
+// preventing race conditions where two concurrent requests could both
+// successfully verify the same OTP.
+//
+// This method is concurrency-safe and does not require the caller to
+// separately mark the OTP as used - it is done atomically within the
+// transaction.
+func (s *Service) VerifyAtomic(ctx context.Context, tenantID int64, phoneNumber, code string) error {
+	phoneNumber = strings.TrimSpace(phoneNumber)
+	if !isE164PhoneNumber(phoneNumber) {
+		return ErrInvalidPhoneNumber
+	}
+
+	if tenantID == 0 {
+		return errors.New("tenant ID is required")
+	}
+
+	code = strings.TrimSpace(code)
+	if err := validateCode(code); err != nil {
+		return ErrInvalidCode
+	}
+
+	// Begin a transaction
+	tx, err := s.repository.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	// Lock the row with FOR UPDATE SKIP LOCKED
+	record, found, err := s.repository.GetLatestUnusedForUpdate(ctx, tx, GetOTPParams{
+		PhoneNumber: phoneNumber,
+		TenantID:    tenantID,
+	})
+	if err != nil {
+		return fmt.Errorf("load OTP: %w", err)
+	}
+	if !found {
+		return ErrInvalidOTP
+	}
+
+	// Check expiration
+	if record.ExpiresAt.Before(s.now()) {
+		return ErrOTPExpired
+	}
+
+	// Compare code with hash
+	matches, err := s.compare(code, record.CodeHash)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCode) {
+			return ErrInvalidCode
+		}
+		return fmt.Errorf("compare OTP: %w", err)
+	}
+	if !matches {
+		return ErrInvalidOTP
+	}
+
+	// Mark the OTP as used within the same transaction
+	if err := s.repository.MarkAsUsedInTx(ctx, tx, MarkOTPParams{ID: record.ID, TenantID: tenantID}); err != nil {
+		if errors.Is(err, ErrOTPNotFound) {
+			return ErrInvalidOTP
+		}
+		return fmt.Errorf("mark OTP as used: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 
 	return nil
