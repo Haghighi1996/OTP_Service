@@ -12,6 +12,7 @@ developed incrementally as a production-minded modular monolith.
 - Phase 2.4: pgx connection pool — complete.
 - Phase 2.5: PostgreSQL OTP repository — complete.
 - Phase 2.6: Secure OTP generation — complete.
+- Phase 2.7: OTP hashing and comparison — complete.
 
 ## Database schema
 
@@ -48,5 +49,6 @@ are `DB_MAX_CONNS`, `DB_MIN_CONNS`, `DB_MAX_CONN_LIFETIME`,
 OTP persistence is isolated behind the `internal/otp.Repository` interface.
 The PostgreSQL implementation stores only the supplied OTP hash and returns the
 database-generated record. OTP generation uses `crypto/rand` to produce numeric
-codes without predictable randomness. Hashing, sending, and verification are
-implemented in later phases.
+codes without predictable randomness. OTPs are hashed with bcrypt before they
+reach persistence. Sending and verification flows are implemented in later
+phases.
