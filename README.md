@@ -9,6 +9,9 @@ developed incrementally as a production-minded modular monolith.
 - Phase 2.1: PostgreSQL Docker Compose setup — complete.
 - Phase 2.2: OTP database design and SQL schema — complete.
 - Phase 2.3: Versioned database migrations — complete.
+- Phase 2.4: pgx connection pool — complete.
+- Phase 2.5: PostgreSQL OTP repository — complete.
+- Phase 2.6: Secure OTP generation — complete.
 
 ## Database schema
 
@@ -44,5 +47,6 @@ are `DB_MAX_CONNS`, `DB_MIN_CONNS`, `DB_MAX_CONN_LIFETIME`,
 
 OTP persistence is isolated behind the `internal/otp.Repository` interface.
 The PostgreSQL implementation stores only the supplied OTP hash and returns the
-database-generated record. Business rules for generating, hashing, sending, and
-verifying OTPs are implemented in later phases.
+database-generated record. OTP generation uses `crypto/rand` to produce numeric
+codes without predictable randomness. Hashing, sending, and verification are
+implemented in later phases.
