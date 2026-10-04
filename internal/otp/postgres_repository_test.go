@@ -157,4 +157,73 @@ func TestPostgresRepositoryGetLatestUnusedByPhoneNumber(t *testing.T) {
 	if record.ID != newer.ID || record.CodeHash != "newer-hash" {
 		t.Errorf("record = %+v, want newest unused OTP", record)
 	}
+
+	_ = repository.MarkAsUsed(ctx, newer.ID)
+	record, err = repository.GetLatestUnusedByPhoneNumber(ctx, phoneNumber)
+	if err != nil {
+		t.Fatalf("GetLatestUnusedByPhoneNumber() after mark: %v", err)
+	}
+	if record.ID != older.ID || record.CodeHash != "older-hash" {
+		t.Errorf("record = %+v, want older unused OTP after newer consumed", record)
+	}
+}
+
+func TestPostgresRepositoryMarkAsUsed(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	defer pool.Close()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	repository := newPostgresRepository(tx)
+
+	t.Run("returns ErrOTPNotFound for nonexistent OTP", func(t *testing.T) {
+		err := repository.MarkAsUsed(ctx, 999999)
+		if !errors.Is(err, ErrOTPNotFound) {
+			t.Fatalf("MarkAsUsed() error = %v, want ErrOTPNotFound", err)
+		}
+	})
+
+	record, err := repository.Create(ctx, CreateParams{
+		PhoneNumber: "+12025550999",
+		CodeHash:    "stored-hash",
+		ExpiresAt:   time.Now().UTC().Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	t.Run("marks OTP as used", func(t *testing.T) {
+		if err := repository.MarkAsUsed(ctx, record.ID); err != nil {
+			t.Fatalf("MarkAsUsed() error = %v", err)
+		}
+
+		var usedAt *time.Time
+		err := tx.QueryRow(ctx, "SELECT used_at FROM otps WHERE id = $1", record.ID).Scan(&usedAt)
+		if err != nil {
+			t.Fatalf("query used_at: %v", err)
+		}
+		if usedAt == nil {
+			t.Error("used_at was not set")
+		}
+	})
+
+	t.Run("returns ErrOTPNotFound when already used", func(t *testing.T) {
+		err := repository.MarkAsUsed(ctx, record.ID)
+		if !errors.Is(err, ErrOTPNotFound) {
+			t.Fatalf("MarkAsUsed() error = %v, want ErrOTPNotFound", err)
+		}
+	})
 }
