@@ -39,3 +39,10 @@ The server verifies PostgreSQL connectivity before accepting requests and
 closes its connection pool during graceful shutdown. The optional pool settings
 are `DB_MAX_CONNS`, `DB_MIN_CONNS`, `DB_MAX_CONN_LIFETIME`,
 `DB_MAX_CONN_IDLE_TIME`, and `DB_HEALTH_CHECK_PERIOD`.
+
+## Architecture
+
+OTP persistence is isolated behind the `internal/otp.Repository` interface.
+The PostgreSQL implementation stores only the supplied OTP hash and returns the
+database-generated record. Business rules for generating, hashing, sending, and
+verifying OTPs are implemented in later phases.
