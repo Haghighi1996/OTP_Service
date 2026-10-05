@@ -3,11 +3,11 @@ package worker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"otp-service/internal/delivery"
+	"otp-service/internal/retry"
 )
 
 // ErrQueueFull is returned when the job queue is full and backpressure is applied.
@@ -21,7 +21,6 @@ type DeliveryJob struct {
 	PhoneNumber string
 	Code        string
 	Adapter     delivery.Adapter
-	Retry       int
 	MaxRetries  int
 
 	// Result channel receives the error (or nil on success) after the job completes.
@@ -31,25 +30,28 @@ type DeliveryJob struct {
 
 // Do executes the delivery job with retries and exponential backoff.
 func (j *DeliveryJob) Do(ctx context.Context) error {
-	var lastErr error
-	for attempt := 0; attempt <= j.MaxRetries; attempt++ {
-		if attempt > 0 {
-			// Exponential backoff: 100ms, 200ms, 400ms...
-			backoff := time.Duration(100<<attempt) * time.Millisecond
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-
-		if err := j.Adapter.Send(ctx, j.PhoneNumber, j.Code); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
+	// Use retry package for better reliability
+	retryOpts := &retry.RetryOptions{
+		MaxRetries: j.MaxRetries,
+		BackoffStrategy: &retry.ExponentialBackoff{
+			Base:       100 * time.Millisecond,
+			Jitter:     50 * time.Millisecond,
+			MaxBackoff: 30 * time.Second,
+		},
+		AllowContextCancellation: true,
 	}
-	return fmt.Errorf("delivery failed after %d retries: %w", j.MaxRetries, lastErr)
+
+	_, err := retry.Retry(ctx, retryOpts, func(ctx context.Context) (interface{}, error) {
+		if err := j.Adapter.Send(ctx, j.PhoneNumber, j.Code); err != nil {
+			return nil, err
+		}
+		return "delivered", nil
+	})
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // JobQueue is a bounded queue for delivery jobs.
