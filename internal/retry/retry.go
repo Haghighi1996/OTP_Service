@@ -69,7 +69,7 @@ func Retry(ctx context.Context, opts *RetryOptions, fn RetryFunc) (interface{}, 
 			}
 		}
 
-		backoff := opts.BackoffStrategy.Next(attempt, opts.BackoffStrategy.MaxBackoff)
+		backoff := opts.BackoffStrategy.Next(attempt, 0)
 
 		select {
 		case <-time.After(backoff):
@@ -112,7 +112,7 @@ func RetryVoid(ctx context.Context, opts *RetryOptions, fn func(ctx context.Cont
 			}
 		}
 
-		backoff := opts.BackoffStrategy.Next(attempt, opts.BackoffStrategy.MaxBackoff)
+		backoff := opts.BackoffStrategy.Next(attempt, 0)
 
 		select {
 		case <-time.After(backoff):

@@ -2,7 +2,6 @@ package retry
 
 import (
 	"context"
-	"time"
 )
 
 // WithContext returns a new RetryOptions with the given context set.

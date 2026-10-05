@@ -30,6 +30,9 @@ type DeliveryJob struct {
 
 // Do executes the delivery job with retries and exponential backoff.
 func (j *DeliveryJob) Do(ctx context.Context) error {
+	if j.Adapter == nil {
+		return delivery.ErrDeliveryFailed
+	}
 	// Use retry package for better reliability
 	retryOpts := &retry.RetryOptions{
 		MaxRetries: j.MaxRetries,

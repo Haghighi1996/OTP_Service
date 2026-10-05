@@ -23,6 +23,7 @@ func TestServiceIssue(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	issued, err := service.Issue(context.Background(), testTenantID, " +12025550123 ")
@@ -61,6 +62,7 @@ func TestServiceIssueRejectsInvalidPhoneNumber(t *testing.T) {
 		time.Now,
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	_, err := service.Issue(context.Background(), testTenantID, "202-555-0123")
@@ -82,6 +84,7 @@ func TestServiceIssueRejectsZeroTenantID(t *testing.T) {
 		time.Now,
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	_, err := service.Issue(context.Background(), 0, "+12025550123")
@@ -148,6 +151,7 @@ func TestServiceIssueReturnsRepositoryError(t *testing.T) {
 		time.Now,
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	_, err := service.Issue(context.Background(), testTenantID, "+12025550123")
@@ -172,6 +176,7 @@ func TestServiceVerify(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	if err := service.Verify(context.Background(), testTenantID, " +12025550123 ", "012345"); err != nil {
@@ -199,6 +204,7 @@ func TestServiceVerifyMarksOTPAsUsed(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	if err := service.Verify(context.Background(), testTenantID, "+12025550123", "012345"); err != nil {
@@ -227,6 +233,7 @@ func TestServiceVerifyRejectsExpiredOTP(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := service.Verify(context.Background(), testTenantID, "+12025550123", "012345")
@@ -252,6 +259,7 @@ func TestServiceVerifyReturnsErrInvalidOTPOnFailedMarkAsUsed(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := service.Verify(context.Background(), testTenantID, "+12025550123", "012345")
@@ -350,6 +358,7 @@ func TestServiceVerifyReturnsRepositoryError(t *testing.T) {
 		time.Now,
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := service.Verify(context.Background(), testTenantID, "+12025550123", "012345")
@@ -369,6 +378,7 @@ func TestServiceVerifyRejectsZeroTenantID(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := service.Verify(context.Background(), 0, "+12025550123", "012345")
@@ -446,6 +456,7 @@ func TestServiceVerifyAtomicRejectsExpiredOTP(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "012345")
@@ -465,6 +476,7 @@ func TestServiceVerifyAtomicRejectsInvalidCode(t *testing.T) {
 		func() time.Time { return now },
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "wrong")
@@ -483,6 +495,7 @@ func TestServiceVerifyAtomicRejectsMissingOTP(t *testing.T) {
 		time.Now,
 		DefaultCodeLength,
 		DefaultTTL,
+		nil,
 	)
 
 	err := svc.VerifyAtomic(context.Background(), testTenantID, "+12025550123", "012345")
