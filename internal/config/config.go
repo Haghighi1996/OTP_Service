@@ -75,14 +75,14 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		HTTPAddr:     httpAddr,
-		DatabaseURL:  databaseURL,
-		RedisURL:     redisURL,
-		DBMaxConns:   maxConns,
-		DBMinConns:   minConns,
+		HTTPAddr:          httpAddr,
+		DatabaseURL:       databaseURL,
+		RedisURL:          redisURL,
+		DBMaxConns:        maxConns,
+		DBMinConns:        minConns,
 		DBMaxConnLifetime: maxConnLifetime,
 		DBMaxConnIdleTime: maxConnIdleTime,
-		DBHealthCheck:  healthCheck,
+		DBHealthCheck:     healthCheck,
 	}, nil
 }
 

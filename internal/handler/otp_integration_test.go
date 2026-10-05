@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"otp-service/internal/delivery"
 	"otp-service/internal/otp"
+	"otp-service/internal/worker"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -29,7 +31,14 @@ func TestOTPVerifyHTTPFlow(t *testing.T) {
 	defer pool.Close()
 
 	repository := otp.NewPostgresRepository(pool)
-	service := otp.NewService(repository)
+	workerPool := worker.NewWorkerPool(worker.WorkerPoolConfig{
+		QueueCapacity: 10,
+		WorkerCount:   1,
+		Delivery:      delivery.NoOp{},
+	})
+	_ = workerPool.Start(context.Background())
+	defer workerPool.Shutdown(context.Background())
+	service := otp.NewService(repository, workerPool)
 	otpHandler := NewOTPHandler(service)
 
 	phoneNumber := "+12025550177"
@@ -94,7 +103,14 @@ func TestOTPVerifyHTTPExpired(t *testing.T) {
 	defer pool.Close()
 
 	repository := otp.NewPostgresRepository(pool)
-	service := otp.NewService(repository)
+	workerPool := worker.NewWorkerPool(worker.WorkerPoolConfig{
+		QueueCapacity: 10,
+		WorkerCount:   1,
+		Delivery:      delivery.NoOp{},
+	})
+	_ = workerPool.Start(context.Background())
+	defer workerPool.Shutdown(context.Background())
+	service := otp.NewService(repository, workerPool)
 	otpHandler := NewOTPHandler(service)
 
 	phoneNumber := "+12025550178"

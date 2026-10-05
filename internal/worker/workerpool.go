@@ -21,14 +21,14 @@ func (e *ErrBackoffExceeded) Error() string {
 
 // WorkerPool manages a pool of workers that process delivery jobs.
 type WorkerPool struct {
-	queue       *JobQueue
-	workers     int32
-	running     atomic.Bool
-	wg          sync.WaitGroup
-	stopChan    chan struct{}
-	maxBackoff  time.Duration
-	delivery    delivery.Adapter
-	maxRetries  int
+	queue      *JobQueue
+	workers    int32
+	running    atomic.Bool
+	wg         sync.WaitGroup
+	stopChan   chan struct{}
+	maxBackoff time.Duration
+	delivery   delivery.Adapter
+	maxRetries int
 }
 
 // WorkerPoolConfig holds configuration for a worker pool.

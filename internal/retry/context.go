@@ -46,11 +46,11 @@ func RetryContext(ctx context.Context, opts *RetryOptions, fn func(context.Conte
 	if opts == nil {
 		opts = DefaultRetryOptions()
 	}
-	
+
 	if opts.Context != nil {
 		ctx = opts.Context
 	}
-	
+
 	return Retry(ctx, opts, fn)
 }
 
@@ -59,11 +59,11 @@ func RetryContextVoid(ctx context.Context, opts *RetryOptions, fn func(context.C
 	if opts == nil {
 		opts = DefaultRetryOptions()
 	}
-	
+
 	if opts.Context != nil {
 		ctx = opts.Context
 	}
-	
+
 	return RetryVoid(ctx, opts, fn)
 }
 

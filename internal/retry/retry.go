@@ -9,19 +9,19 @@ import (
 
 // RetryOptions configures retry behavior.
 type RetryOptions struct {
-	MaxRetries             int
-	BackoffStrategy        BackoffStrategy
-	RetryableErrors        []error
-	NonRetryableErrors     []error
+	MaxRetries               int
+	BackoffStrategy          BackoffStrategy
+	RetryableErrors          []error
+	NonRetryableErrors       []error
 	AllowContextCancellation bool
-	Context                context.Context
+	Context                  context.Context
 }
 
 // DefaultRetryOptions returns sensible defaults for retry configuration.
 func DefaultRetryOptions() *RetryOptions {
 	return &RetryOptions{
-		MaxRetries:             3,
-		BackoffStrategy:        DefaultExponentialBackoff(),
+		MaxRetries:               3,
+		BackoffStrategy:          DefaultExponentialBackoff(),
 		AllowContextCancellation: true,
 	}
 }
@@ -53,7 +53,7 @@ func Retry(ctx context.Context, opts *RetryOptions, fn RetryFunc) (interface{}, 
 		}
 
 		if opts.MaxRetries >= 0 && attempt >= opts.MaxRetries {
-			return result, fmt.Errorf("%w: %v", ErrMaxRetries, lastErr)
+			return result, fmt.Errorf("%w: %w", ErrMaxRetries, lastErr)
 		}
 
 		var nr NonRetryableError
@@ -64,7 +64,7 @@ func Retry(ctx context.Context, opts *RetryOptions, fn RetryFunc) (interface{}, 
 		if opts.AllowContextCancellation {
 			select {
 			case <-retryCtx.Done():
-				return result, fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+				return result, fmt.Errorf("%w: %w", ctx.Err(), lastErr)
 			default:
 			}
 		}
@@ -74,7 +74,7 @@ func Retry(ctx context.Context, opts *RetryOptions, fn RetryFunc) (interface{}, 
 		select {
 		case <-time.After(backoff):
 		case <-retryCtx.Done():
-			return result, fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+			return result, fmt.Errorf("%w: %w", ctx.Err(), lastErr)
 		}
 
 		lastErr = err
@@ -96,7 +96,7 @@ func RetryVoid(ctx context.Context, opts *RetryOptions, fn func(ctx context.Cont
 		}
 
 		if opts.MaxRetries >= 0 && attempt >= opts.MaxRetries {
-			return fmt.Errorf("%w: %v", ErrMaxRetries, lastErr)
+			return fmt.Errorf("%w: %w", ErrMaxRetries, lastErr)
 		}
 
 		var nr NonRetryableError
@@ -107,7 +107,7 @@ func RetryVoid(ctx context.Context, opts *RetryOptions, fn func(ctx context.Cont
 		if opts.AllowContextCancellation {
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+				return fmt.Errorf("%w: %w", ctx.Err(), lastErr)
 			default:
 			}
 		}
@@ -117,7 +117,7 @@ func RetryVoid(ctx context.Context, opts *RetryOptions, fn func(ctx context.Cont
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
-			return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+			return fmt.Errorf("%w: %w", ctx.Err(), lastErr)
 		}
 
 		lastErr = err
@@ -126,14 +126,14 @@ func RetryVoid(ctx context.Context, opts *RetryOptions, fn func(ctx context.Cont
 
 // Stats records retry statistics.
 type Stats struct {
-	Attempts            int
-	Successful          bool
-	TotalRetries        int
-	TotalBackoff        time.Duration
-	LastError           error
-	ErrorTypes          map[error]int
-	ContextCancels      int
-	MaxRetriesExceeded  bool
+	Attempts           int
+	Successful         bool
+	TotalRetries       int
+	TotalBackoff       time.Duration
+	LastError          error
+	ErrorTypes         map[error]int
+	ContextCancels     int
+	MaxRetriesExceeded bool
 }
 
 // NewStats creates a new Stats instance.

@@ -38,8 +38,8 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	tests := []struct {
 		name string
-		set    func(t *testing.T)
-		want   string
+		set  func(t *testing.T)
+		want string
 	}{
 		{
 			name: "missing database URL",
@@ -51,6 +51,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		{
 			name: "missing redis URL",
 			set: func(t *testing.T) {
+				t.Setenv("DATABASE_URL", "postgres://user:password@localhost:5432/otp_db?sslmode=disable")
 				t.Setenv("REDIS_URL", "")
 			},
 			want: "REDIS_URL is required",
@@ -59,6 +60,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 			name: "minimum connections above maximum",
 			set: func(t *testing.T) {
 				t.Setenv("DATABASE_URL", "postgres://user:password@localhost:5432/otp_db?sslmode=disable")
+				t.Setenv("REDIS_URL", "redis://localhost:6379")
 				t.Setenv("DB_MIN_CONNS", "11")
 			},
 			want: "DB_MIN_CONNS cannot be greater",
@@ -67,6 +69,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 			name: "non-positive maximum connections",
 			set: func(t *testing.T) {
 				t.Setenv("DATABASE_URL", "postgres://user:password@localhost:5432/otp_db?sslmode=disable")
+				t.Setenv("REDIS_URL", "redis://localhost:6379")
 				t.Setenv("DB_MAX_CONNS", "0")
 			},
 			want: "DB_MAX_CONNS must be a positive integer",
@@ -75,6 +78,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 			name: "invalid duration",
 			set: func(t *testing.T) {
 				t.Setenv("DATABASE_URL", "postgres://user:password@localhost:5432/otp_db?sslmode=disable")
+				t.Setenv("REDIS_URL", "redis://localhost:6379")
 				t.Setenv("DB_HEALTH_CHECK_PERIOD", "soon")
 			},
 			want: "DB_HEALTH_CHECK_PERIOD must be a positive duration",

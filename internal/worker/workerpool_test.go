@@ -131,10 +131,10 @@ func TestWorkerPoolBackpressure(t *testing.T) {
 
 func TestWorkerPoolDelivery(t *testing.T) {
 	pool := NewWorkerPool(WorkerPoolConfig{
-		WorkerCount:  1,
+		WorkerCount:   1,
 		QueueCapacity: 10,
-		Delivery:     delivery.NoOp{},
-		MaxRetries:   0,
+		Delivery:      delivery.NoOp{},
+		MaxRetries:    0,
 	})
 	ctx := context.Background()
 

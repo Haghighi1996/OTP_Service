@@ -10,7 +10,7 @@ var ErrMaxRetries = errors.New("maximum retries exceeded")
 
 // ErrBackoffExceeded is returned when the backoff duration exceeds the maximum allowed.
 type ErrBackoffExceeded struct {
-	MaxBackoff  any
+	MaxBackoff    any
 	ActualBackoff any
 }
 

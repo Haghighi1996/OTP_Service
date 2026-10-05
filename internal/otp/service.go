@@ -111,9 +111,9 @@ func (s *Service) Issue(ctx context.Context, tenantID int64, phoneNumber string)
 
 	// Create the IssuedOTP with a delivery result channel
 	issued := IssuedOTP{
-		Record:           record,
-		Code:             code,
-		DeliveryResult:   make(chan error, 1),
+		Record:         record,
+		Code:           code,
+		DeliveryResult: make(chan error, 1),
 	}
 
 	// Asynchronously enqueue the delivery job
@@ -299,4 +299,3 @@ func isE164PhoneNumber(phoneNumber string) bool {
 
 	return true
 }
-
