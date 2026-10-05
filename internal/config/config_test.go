@@ -8,6 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:password@localhost:5432/otp_db?sslmode=disable")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
 	t.Setenv("HTTP_ADDR", "")
 	t.Setenv("DB_MAX_CONNS", "")
 	t.Setenv("DB_MIN_CONNS", "")
@@ -29,18 +30,30 @@ func TestLoadDefaults(t *testing.T) {
 	if config.DBMaxConnLifetime != time.Hour {
 		t.Errorf("DBMaxConnLifetime = %v, want %v", config.DBMaxConnLifetime, time.Hour)
 	}
+	if config.RedisURL != "redis://localhost:6379" {
+		t.Errorf("RedisURL = %q, want %q", config.RedisURL, "redis://localhost:6379")
+	}
 }
 
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	tests := []struct {
 		name string
-		set  func(t *testing.T)
-		want string
+		set    func(t *testing.T)
+		want   string
 	}{
 		{
 			name: "missing database URL",
-			set:  func(t *testing.T) {},
+			set: func(t *testing.T) {
+				t.Setenv("DATABASE_URL", "")
+			},
 			want: "DATABASE_URL is required",
+		},
+		{
+			name: "missing redis URL",
+			set: func(t *testing.T) {
+				t.Setenv("REDIS_URL", "")
+			},
+			want: "REDIS_URL is required",
 		},
 		{
 			name: "minimum connections above maximum",
@@ -71,6 +84,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("DATABASE_URL", "")
+			t.Setenv("REDIS_URL", "")
 			t.Setenv("DB_MAX_CONNS", "")
 			t.Setenv("DB_MIN_CONNS", "")
 			t.Setenv("DB_HEALTH_CHECK_PERIOD", "")

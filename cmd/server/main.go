@@ -12,6 +12,7 @@ import (
 	"otp-service/internal/database"
 	"otp-service/internal/handler"
 	"otp-service/internal/otp"
+	"otp-service/internal/redis"
 	"syscall"
 	"time"
 )
@@ -40,6 +41,16 @@ func run() error {
 	}
 	defer pool.Close()
 
+	// Initialize Redis client and rate limiter
+	redisClient := redis.NewClient(settings)
+	defer redisClient.Close()
+	rateLimiter := redis.NewLimiter(redisClient, redis.DefaultConfig())
+
+	// Verify Redis connectivity
+	if err := redisClient.Ping(connectContext); err != nil {
+		return fmt.Errorf("redis connection failed: %w", err)
+	}
+
 	// Initialize auth store and middleware
 	authStore := auth.NewStore(pool)
 	authMiddleware := auth.Middleware(authStore)
@@ -51,9 +62,9 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.HealthHandler)
 
-	// Apply auth middleware to OTP endpoints
-	mux.Handle("/v1/otp/send", authMiddleware(http.HandlerFunc(otpHandler.Send)))
-	mux.Handle("/v1/otp/verify", authMiddleware(http.HandlerFunc(otpHandler.Verify)))
+	// Apply auth middleware, then rate limiting middleware to OTP endpoints
+	mux.Handle("/v1/otp/send", authMiddleware(rateLimiter.Middleware(http.HandlerFunc(otpHandler.Send))))
+	mux.Handle("/v1/otp/verify", authMiddleware(rateLimiter.Middleware(http.HandlerFunc(otpHandler.Verify))))
 
 	server := &http.Server{
 		Addr:    settings.HTTPAddr,

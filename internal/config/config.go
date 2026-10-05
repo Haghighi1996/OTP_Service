@@ -24,6 +24,7 @@ type Config struct {
 	HTTPAddr string
 
 	DatabaseURL       string
+	RedisURL          string
 	DBMaxConns        int32
 	DBMinConns        int32
 	DBMaxConnLifetime time.Duration
@@ -36,6 +37,11 @@ func Load() (Config, error) {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	redisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	if redisURL == "" {
+		return Config{}, fmt.Errorf("REDIS_URL is required")
 	}
 
 	maxConns, err := positiveInt32FromEnv("DB_MAX_CONNS", defaultDBMaxConns)
@@ -69,13 +75,14 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		HTTPAddr:          httpAddr,
-		DatabaseURL:       databaseURL,
-		DBMaxConns:        maxConns,
-		DBMinConns:        minConns,
+		HTTPAddr:     httpAddr,
+		DatabaseURL:  databaseURL,
+		RedisURL:     redisURL,
+		DBMaxConns:   maxConns,
+		DBMinConns:   minConns,
 		DBMaxConnLifetime: maxConnLifetime,
 		DBMaxConnIdleTime: maxConnIdleTime,
-		DBHealthCheck:     healthCheck,
+		DBHealthCheck:  healthCheck,
 	}, nil
 }
 
