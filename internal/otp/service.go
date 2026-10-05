@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"otp-service/internal/delivery"
 )
+
+// Deliverer is an interface for enqueuing OTP delivery jobs.
+// The concrete implementation is typically the worker pool.
+type Deliverer = delivery.Deliverer
 
 const DefaultTTL = 5 * time.Minute
 
@@ -21,6 +27,14 @@ var (
 type IssuedOTP struct {
 	Record OTP
 	Code   string
+
+	// DeliveryResult receives the OTP delivery result after Issue() returns.
+	// It is a buffered channel of size 1 that receives an error (or nil on success)
+	// once the delivery job completes. If the caller does not read from this channel,
+	// the delivery will be processed in the background.
+	// The caller must ensure the channel is drained before the service shuts down
+	// to avoid resource leaks.
+	DeliveryResult chan error
 }
 
 // Service coordinates OTP generation, hashing, expiry, and persistence.
@@ -32,11 +46,12 @@ type Service struct {
 	now        func() time.Time
 	codeLength int
 	ttl        time.Duration
+	deliverer  Deliverer
 }
 
 // NewService creates an OTP service with production defaults.
-func NewService(repository Repository) *Service {
-	return newService(repository, GenerateCode, HashCode, VerifyCode, time.Now, DefaultCodeLength, DefaultTTL)
+func NewService(repository Repository, deliverer Deliverer) *Service {
+	return newService(repository, GenerateCode, HashCode, VerifyCode, time.Now, DefaultCodeLength, DefaultTTL, deliverer)
 }
 
 func newService(
@@ -47,6 +62,7 @@ func newService(
 	now func() time.Time,
 	codeLength int,
 	ttl time.Duration,
+	deliverer Deliverer,
 ) *Service {
 	return &Service{
 		repository: repository,
@@ -56,10 +72,13 @@ func newService(
 		now:        now,
 		codeLength: codeLength,
 		ttl:        ttl,
+		deliverer:  deliverer,
 	}
 }
 
 // Issue creates and persists a new OTP for a phone number.
+// After persisting, it asynchronously enqueues a delivery job.
+// The caller can read from IssuedOTP.DeliveryResult to check delivery status.
 func (s *Service) Issue(ctx context.Context, tenantID int64, phoneNumber string) (IssuedOTP, error) {
 	phoneNumber = strings.TrimSpace(phoneNumber)
 	if !isE164PhoneNumber(phoneNumber) {
@@ -90,7 +109,44 @@ func (s *Service) Issue(ctx context.Context, tenantID int64, phoneNumber string)
 		return IssuedOTP{}, fmt.Errorf("persist OTP: %w", err)
 	}
 
-	return IssuedOTP{Record: record, Code: code}, nil
+	// Create the IssuedOTP with a delivery result channel
+	issued := IssuedOTP{
+		Record:           record,
+		Code:             code,
+		DeliveryResult:   make(chan error, 1),
+	}
+
+	// Asynchronously enqueue the delivery job
+	// Don't block Issue() on delivery - fire-and-forget
+	if s.deliverer != nil {
+		go func() {
+			// Try to submit the delivery job
+			resultChan, err := s.deliverer.EnqueueDelivery(phoneNumber, code)
+			if err != nil {
+				// Could not submit job (e.g., queue full, stopped)
+				// Send error to the delivery result channel
+				select {
+				case issued.DeliveryResult <- err:
+				case <-time.After(time.Second):
+					// Timed out sending result - don't block Issue()
+				}
+				return
+			}
+
+			// Forward the delivery result to the caller
+			// (channel is buffered with size 1 in workerpool)
+			result, ok := <-resultChan
+			if ok {
+				select {
+				case issued.DeliveryResult <- result:
+				case <-time.After(time.Second):
+					// Timed out forwarding result - don't block Issue()
+				}
+			}
+		}()
+	}
+
+	return issued, nil
 }
 
 // Verify checks a submitted OTP against the newest unused record for a phone

@@ -10,9 +10,11 @@ import (
 	"otp-service/internal/auth"
 	"otp-service/internal/config"
 	"otp-service/internal/database"
+	"otp-service/internal/delivery"
 	"otp-service/internal/handler"
 	"otp-service/internal/otp"
 	"otp-service/internal/redis"
+	"otp-service/internal/worker"
 	"syscall"
 	"time"
 )
@@ -51,12 +53,27 @@ func run() error {
 		return fmt.Errorf("redis connection failed: %w", err)
 	}
 
+	// Initialize worker pool for async OTP delivery
+	workerPool := worker.NewWorkerPool(worker.WorkerPoolConfig{
+		QueueCapacity: 100,
+		WorkerCount:   4,
+		MaxBackoff:    30 * time.Second,
+		MaxRetries:    3,
+		Delivery:      delivery.NoOp{},
+	})
+
+	if err := workerPool.Start(appContext); err != nil {
+		return fmt.Errorf("start worker pool: %w", err)
+	}
+	defer workerPool.Shutdown(connectContext)
+
 	// Initialize auth store and middleware
 	authStore := auth.NewStore(pool)
 	authMiddleware := auth.Middleware(authStore)
 
 	otpRepository := otp.NewPostgresRepository(pool)
-	otpService := otp.NewService(otpRepository)
+	otpService := otp.NewService(otpRepository, workerPool)
+
 	otpHandler := handler.NewOTPHandler(otpService)
 
 	mux := http.NewServeMux()
